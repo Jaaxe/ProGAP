@@ -1,37 +1,31 @@
-# Running ProGAP on Yale's Bouchet Cluster
+# Running ProGAP on Yale Bouchet HPC
 
-This guide documents the full workflow for running the **ProGAP** repository on Yale's **Bouchet HPC cluster**, including solutions to environment and dependency issues encountered during setup.
+This guide documents the **complete workflow for running the ProGAP repository on the Bouchet cluster**, including environment setup, dependency fixes, and large-scale experiment execution.
 
-The goals of this setup are:
-
-- **Zero changes to the original repo code**
-- **Reproducible environment**
-- **Proper HPC usage**
-- **All datasets/results stored in scratch**
+It also records solutions to issues encountered during setup (PyG build issues, WandB non-TTY errors, etc.).
 
 ---
 
 # 1. SSH into Bouchet
 
-From your local machine:
-
 ```bash
 ssh jyx5@bouchet.ycrc.yale.edu
 ```
 
-It is highly recommended to use **tmux** so your session survives SSH disconnects.
+---
 
-Start tmux:
+# 2. Start a persistent terminal session (tmux)
+
+Long jobs and environment setup should be done inside `tmux`.
 
 ```bash
 tmux new -s progap
 ```
 
-Detach from tmux:
+Detach session:
 
 ```
-Ctrl + b
-d
+Ctrl+B then D
 ```
 
 Reconnect later:
@@ -42,69 +36,9 @@ tmux attach -t progap
 
 ---
 
-# 2. Repository Location
+# 3. Activate Conda environment
 
-Clone the repository into your **home directory**:
-
-```bash
-cd ~
-git clone <repo_url> ProGAP
-cd ~/ProGAP
-```
-
-Home directory is appropriate for **code**, since it is backed up.
-
----
-
-# 3. Standard Scratch Directory
-
-Datasets, outputs, logs, and temporary files should go to scratch storage.
-
-Set environment variables:
-
-```bash
-export PI_SCRATCH=/nfs/roberts/scratch/pi_ql324/jyx5
-export PROGAP_SCRATCH=$PI_SCRATCH/progap
-
-export PROGAP_DATA=$PROGAP_SCRATCH/datasets
-export PROGAP_RUNS=$PROGAP_SCRATCH/runs
-export PROGAP_LOGS=$PROGAP_SCRATCH/logs
-export TMPDIR=$PROGAP_SCRATCH/tmp
-
-export PIP_DISABLE_PIP_VERSION_CHECK=1
-```
-
-Create the directories:
-
-```bash
-mkdir -p $PROGAP_SCRATCH/{datasets,runs,logs,tmp,env,commands}
-```
-
----
-
-# 4. Request an Interactive GPU Node
-
-For debugging and development use the **gpu_devel partition**.
-
-Example allocation:
-
-```bash
-salloc -p gpu_devel --gpus=1 --cpus-per-task=2 --mem=10G --time=01:00:00
-```
-
-Once allocated your prompt will change to something like:
-
-```
-jyx5@a1122u02n01.bouchet
-```
-
-You are now on a **compute node with GPU access**.
-
----
-
-# 5. Activate Conda Environment
-
-Load miniconda and activate the environment:
+Bouchet uses modules for Python environments.
 
 ```bash
 module load miniconda
@@ -112,131 +46,125 @@ source /apps/software/system/software/miniconda/24.11.3/etc/profile.d/conda.sh
 conda activate progap
 ```
 
-If the environment does not exist yet:
-
-```bash
-conda create -n progap python=3.10
-conda activate progap
-```
-
----
-
-# 6. Load CUDA Toolkit
-
-Some PyTorch Geometric components require the CUDA toolkit.
+Load CUDA (required for PyTorch builds):
 
 ```bash
 module load CUDA/12.1.1
 ```
 
-This was necessary when compiling `pyg-lib`.
-
 ---
 
-# 7. Install Python Dependencies
-
-Install repository dependencies:
-
-```bash
-python -m pip install -r requirements.txt
-```
-
-However, two packages required special handling.
-
----
-
-# 8. Install `dp_accounting`
-
-During training we encountered:
-
-```
-ModuleNotFoundError: No module named 'dp_accounting'
-```
-
-Install with:
-
-```bash
-python -m pip install dp-accounting
-```
-
-Verify installation:
-
-```bash
-python -c "import dp_accounting; print('dp_accounting ok')"
-```
-
----
-
-# 9. Install `pyg_lib` (Compile From Source)
-
-Standard installation failed because prebuilt wheels were unavailable for the Bouchet environment.
-
-First load CUDA:
-
-```bash
-module load CUDA/12.1.1
-```
-
-Then build from source:
-
-```bash
-export MAX_JOBS=2
-export CMAKE_ARGS="-DBUILD_TEST=OFF -DBUILD_BENCHMARK=OFF"
-
-python -m pip install \
-  --no-cache-dir \
-  --no-build-isolation \
-  "pyg_lib @ git+https://github.com/pyg-team/pyg-lib.git"
-```
-
-This resolves errors such as:
-
-```
-Could NOT find CUDA
-cmake returned non-zero exit status
-Failed building wheel for pyg_lib
-```
-
-Verify installation:
-
-```bash
-python -c "import pyg_lib; from pyg_lib.sampler import neighbor_sample; print('pyg_lib sampler ok')"
-```
-
----
-
-# 10. Verify the Environment
-
-Run sanity checks:
-
-```bash
-python -c "import torch; print('torch', torch.__version__)"
-python -c "import torch_geometric; print('pyg', torch_geometric.__version__)"
-python -c "import pyg_lib; print('pyg_lib ok')"
-python -c "import dp_accounting; print('dp_accounting ok')"
-```
-
----
-
-# 11. Run a Smoke Test
-
-Navigate to the repository:
+# 4. Navigate to repo
 
 ```bash
 cd ~/ProGAP
 ```
 
-Create a run directory:
+Repo structure:
 
-```bash
-RUN_TAG=smoke_$(date +%Y%m%d_%H%M%S)
-RUN_DIR=$PROGAP_RUNS/$RUN_TAG
-mkdir -p "$RUN_DIR"
+```
+ProGAP/
+ ├── train.py
+ ├── experiments.py
+ ├── core/
+ ├── config/
+ ├── requirements.txt
+ └── results.ipynb
 ```
 
-Run training:
+---
+
+# 5. Set scratch directories (important on Bouchet)
+
+Large data and experiment outputs should go to **scratch**, not `$HOME`.
 
 ```bash
+export PI_SCRATCH=/nfs/roberts/scratch/pi_ql324/jyx5
+
+export PROGAP_SCRATCH=$PI_SCRATCH/progap
+export PROGAP_DATA=$PROGAP_SCRATCH/datasets
+export PROGAP_RUNS=$PROGAP_SCRATCH/runs
+export PROGAP_LOGS=$PROGAP_SCRATCH/logs
+export TMPDIR=$PROGAP_SCRATCH/tmp
+```
+
+Create directories:
+
+```bash
+mkdir -p $PROGAP_SCRATCH/{datasets,runs,logs,tmp}
+```
+
+---
+
+# 6. Install required dependencies
+
+Some dependencies are not automatically installed from `requirements.txt`.
+
+## Install autodp (required by the paper)
+
+```bash
+pip install git+https://github.com/yuxiangw/autodp
+```
+
+## Install dp_accounting
+
+```bash
+pip install dp-accounting
+```
+
+---
+
+# 7. Fix PyTorch Geometric dependency (pyg_lib)
+
+Building `pyg_lib` from source can fail due to missing CUDA/CMake configuration.
+
+If `pyg_lib` is missing:
+
+```bash
+pip install pyg-lib
+```
+
+Verify:
+
+```bash
+python -c "import pyg_lib; from pyg_lib.sampler import neighbor_sample"
+```
+
+Expected output:
+
+```
+(no error)
+```
+
+---
+
+# 8. Disable WandB prompts (important for Slurm)
+
+WandB crashes in non-interactive Slurm jobs because it tries to prompt for an API key.
+
+Fix by running in **offline mode**:
+
+```bash
+export WANDB_MODE=offline
+export WANDB_SILENT=true
+```
+
+This prevents the error:
+
+```
+UsageError: api_key not configured (no-tty)
+```
+
+---
+
+# 9. Quick sanity check run
+
+Before running full experiments, verify training works.
+
+```bash
+RUN_DIR=$PROGAP_RUNS/smoke_test
+mkdir -p $RUN_DIR
+
 python train.py progap edge \
   --dataset facebook \
   --epsilon 1 \
@@ -244,137 +172,232 @@ python train.py progap edge \
   --output_dir "$RUN_DIR"
 ```
 
-Expected runtime is **~2 seconds**.
-
-Example output:
+Expected result:
 
 ```
-test/acc   76.14
-Total running time: ~2 seconds
-Max GPU memory used = 0.16 GB
+training logs
+test/acc ≈ 70-80%
 ```
 
 ---
 
-# 12. Running Jobs with Slurm
+# 10. Generate paper experiments
 
-Create a batch script in scratch:
+The repo automatically generates experiment commands.
 
 ```bash
-cat > $PROGAP_SCRATCH/run_progap_one.sbatch <<'EOF'
+python experiments.py --generate
+```
+
+This creates:
+
+```
+jobs/experiments.sh
+```
+
+Each line is a command like:
+
+```
+python train.py progap edge ...
+```
+
+Inspect commands:
+
+```bash
+sed -n '1,10p' jobs/experiments.sh
+```
+
+---
+
+# 11. Run a single experiment
+
+Test the first command:
+
+```bash
+cmd=$(sed -n '1p' jobs/experiments.sh)
+echo $cmd
+eval $cmd
+```
+
+---
+
+# 12. Run experiments using Slurm arrays
+
+Running all experiments sequentially would take days.
+
+Instead use **Slurm array jobs**.
+
+Create script:
+
+```bash
+nano $PROGAP_SCRATCH/progap_array.sbatch
+```
+
+Paste:
+
+```bash
 #!/bin/bash
-#SBATCH -J progap_one
+#SBATCH -J progap_paper
 #SBATCH -p gpu
 #SBATCH --gpus=1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=32G
-#SBATCH --time=02:00:00
-#SBATCH -o /nfs/roberts/scratch/pi_ql324/jyx5/progap/logs/progap_one_%j.out
-#SBATCH -e /nfs/roberts/scratch/pi_ql324/jyx5/progap/logs/progap_one_%j.err
-
-set -euo pipefail
+#SBATCH --time=08:00:00
+#SBATCH -o /nfs/roberts/scratch/pi_ql324/jyx5/progap/logs/%x_%A_%a.out
+#SBATCH -e /nfs/roberts/scratch/pi_ql324/jyx5/progap/logs/%x_%A_%a.err
 
 module load miniconda
 source /apps/software/system/software/miniconda/24.11.3/etc/profile.d/conda.sh
 conda activate progap
-
-module load CUDA/12.1.1 || true
+module load CUDA/12.1.1
 
 export PI_SCRATCH=/nfs/roberts/scratch/pi_ql324/jyx5
 export PROGAP_SCRATCH=$PI_SCRATCH/progap
 export PROGAP_DATA=$PROGAP_SCRATCH/datasets
 export PROGAP_RUNS=$PROGAP_SCRATCH/runs
 export PROGAP_LOGS=$PROGAP_SCRATCH/logs
-export TMPDIR=$PROGAP_SCRATCH/tmp
 
-RUN_TAG=sbatch_$(date +%Y%m%d_%H%M%S)
-RUN_DIR=$PROGAP_RUNS/$RUN_TAG
-mkdir -p "$RUN_DIR"
+export WANDB_MODE=offline
+export WANDB_SILENT=true
 
-cd /home/jyx5/ProGAP
+cd ~/ProGAP
 
-python train.py progap edge \
-  --dataset facebook \
-  --epsilon 1 \
-  --data_dir "$PROGAP_DATA" \
-  --output_dir "$RUN_DIR"
-EOF
-```
+cmd=$(sed -n "${SLURM_ARRAY_TASK_ID}p" jobs/experiments.sh)
 
-Submit the job:
+echo "Running task ${SLURM_ARRAY_TASK_ID}"
+echo $cmd
 
-```bash
-sbatch $PROGAP_SCRATCH/run_progap_one.sbatch
+eval $cmd
 ```
 
 ---
 
-# 13. Monitor Jobs
+# 13. Submit the array job
 
-View running jobs:
+Count experiments:
+
+```bash
+wc -l jobs/experiments.sh
+```
+
+Example:
+
+```
+2840 experiments
+```
+
+Submit with limited concurrency:
+
+```bash
+sbatch --array=1-2840%10 $PROGAP_SCRATCH/progap_array.sbatch
+```
+
+`%10` limits to **10 GPUs running simultaneously**.
+
+---
+
+# 14. Monitor jobs
+
+Check queue:
 
 ```bash
 squeue -u $USER
 ```
 
-Inspect job details:
+Check logs:
 
 ```bash
-scontrol show job <JOB_ID>
+ls -lt $PROGAP_LOGS
 ```
 
-Watch logs:
+Follow a job:
 
 ```bash
-tail -f $PROGAP_LOGS/progap_one_<JOB_ID>.out
+tail -f $PROGAP_LOGS/progap_paper_<jobid>_1.out
 ```
 
 ---
 
-# 14. Pending Jobs Due to Priority
+# 15. Cancel jobs if needed
 
-If a job shows:
-
-```
-JobState=PENDING Reason=Priority
-```
-
-This means the scheduler is prioritizing other jobs first.
-
-Possible solutions:
-
-- request fewer CPUs
-- reduce memory
-- shorten time limit
-
-Example lighter request:
-
-```
---cpus-per-task=2
---mem=10G
---time=00:30:00
-```
-
----
-
-# 15. Save Environment Snapshot
-
-To preserve the working environment:
+Cancel a job:
 
 ```bash
-python -m pip freeze > $PROGAP_SCRATCH/env/pip_freeze_$(date +%Y%m%d).txt
+scancel JOBID
+```
+
+Cancel all jobs:
+
+```bash
+scancel -u $USER
 ```
 
 ---
 
-# Recommended Daily Workflow
+# 16. Generate paper plots
 
-1. SSH into Bouchet  
-2. Start `tmux`  
-3. Request GPU node with `salloc`  
-4. Activate the `progap` conda environment  
-5. Load CUDA module  
-6. Run experiments  
-7. Submit large runs using `sbatch`
+After experiments finish:
+
+Open:
+
+```
+results.ipynb
+```
+
+Run all cells to reproduce paper figures.
+
+---
+
+# Summary Workflow
+
+```
+SSH into Bouchet
+↓
+tmux session
+↓
+activate conda env
+↓
+set scratch directories
+↓
+generate experiments
+↓
+test one experiment
+↓
+submit Slurm array
+↓
+monitor jobs
+↓
+run results notebook
+```
+
+---
+
+# Notes
+
+### Why tmux?
+Prevents environment loss if SSH disconnects.
+
+### Why scratch?
+Home directories have limited space.
+
+### Why WandB offline?
+Slurm jobs have no interactive terminal.
+
+### Why Slurm arrays?
+Allows running thousands of experiments efficiently.
+
+---
+
+# Quick Commands Cheat Sheet
+
+```
+ssh jyx5@bouchet.ycrc.yale.edu
+tmux new -s progap
+conda activate progap
+cd ~/ProGAP
+python experiments.py --generate
+sbatch --array=1-2840%10 progap_array.sbatch
+squeue -u $USER
+```
 
 ---
